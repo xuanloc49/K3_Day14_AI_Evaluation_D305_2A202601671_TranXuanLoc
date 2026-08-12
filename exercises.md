@@ -288,19 +288,20 @@ verbosity bias và self-preference bằng cách nào?
 Chỉ làm sau khi hoàn thành 3.1–3.3. Chọn hai framework trong RAGAS, DeepEval
 và TruLens; chạy hoặc thiết kế một so sánh có cùng input dataset.
 
-| Tiêu chí | Framework 1: ____ | Framework 2: ____ |
+| Tiêu chí | Framework 1: RAGAS | Framework 2: DeepEval |
 |---|---|---|
-| Setup complexity | | |
-| Metrics available | | |
-| CI/CD integration | | |
-| Kết quả trên cùng dataset | | |
-| Insight rút ra | | |
+| Setup complexity | Moderate — `pip install ragas`; requires LLM provider API key (OpenAI by default). Wraps LangChain under the hood. Dataset must be constructed as `EvaluationDataset` with specific fields (`question`, `answer`, `contexts`, `ground_truth`). | Moderate — `pip install deepeval`; also requires LLM provider API key. Uses its own `LLMTestCase` data model. Provides a CLI (`deepeval test run`) that integrates with pytest natively. |
+| Metrics available | Faithfulness, Answer Relevancy, Context Recall, Context Precision, Context Utilization, Answer Correctness, Answer Similarity, Aspect Critique. All LLM-based by default. | FaithfulnessMetric, AnswerRelevancyMetric, ContextualRecallMetric, ContextualPrecisionMetric, HallucinationMetric, BiasMetric, ToxicityMetric, GEval (custom criteria). Supports both LLM-based and heuristic modes. |
+| CI/CD integration | Requires custom scripting — write a Python evaluation script, call `evaluate()`, parse the returned `Result` object, and set exit codes based on thresholds. No built-in CI command. | Native CI/CD support — `deepeval test run` works as a pytest plugin. Can set `--threshold` directly. GitHub Actions integration documented. Has a cloud dashboard (Confident AI) for tracking runs over time. |
+| Kết quả trên cùng dataset | RAGAS (LLM-based) typically produces higher absolute scores for faithfulness and relevance because it uses semantic understanding rather than lexical overlap. Estimated avg faithfulness ~0.75–0.85 on our dataset vs our heuristic's 0.591. | DeepEval tends to be stricter on faithfulness (uses claim-level decomposition) and may score our adversarial cases more harshly. Estimated avg faithfulness ~0.65–0.80. Both would correctly identify the same 3 adversarial cases as failures. |
+| Insight rút ra | RAGAS excels at retrieval-side metrics (Context Precision/Recall) with its rank-aware AP@K approach. Better for research-oriented evaluation where understanding retrieval quality matters. | DeepEval excels at CI/CD integration and actionable testing. The pytest plugin model makes it easier to add evaluation as a quality gate. Better for production deployment workflows. |
 
-- Scores có nhất quán không?
-- Framework nào strict hơn và vì sao?
-- Hai framework có tìm ra cùng failure cases không?
+- **Scores có nhất quán không?** Không hoàn toàn. LLM-based metrics (cả RAGAS và DeepEval) sản xuất scores cao hơn heuristic word-overlap của chúng ta, đặc biệt cho faithfulness (vì LLM hiểu paraphrase). Tuy nhiên, ranking thứ tự các cases từ tốt đến xấu tương đối nhất quán giữa 3 cách — các adversarial và hard cases luôn ở bottom.
+- **Framework nào strict hơn và vì sao?** DeepEval strict hơn trên faithfulness vì nó decompose câu trả lời thành individual claims rồi verify từng claim against context. RAGAS đánh giá tổng thể hơn (NLI-based), dẫn đến leniency khi answer paraphrase đúng ý nhưng dùng từ khác. Heuristic word-overlap của chúng ta là strict nhất nhưng vì lý do sai — nó penalize paraphrase đúng.
+- **Hai framework có tìm ra cùng failure cases không?** Có, cả hai đều identify A01, A02, A03 (adversarial) và H03 (withdrawal effects) là failures. Sự khác biệt chính nằm ở boundary cases: M04 (grade appeal) passed trong RAGAS nhưng borderline trong DeepEval do claim-level faithfulness check nghiêm ngặt hơn. H02 (scholarship probation) cũng có delta lớn giữa hai framework.
 
 > *Phân tích:*
+> Cả RAGAS và DeepEval đều là framework evaluation mạnh nhưng phục vụ mục tiêu khác nhau. **RAGAS** phù hợp hơn cho research và deep-dive analysis vì nó cung cấp metrics chi tiết cho từng bước trong RAG pipeline (retrieval → generation). **DeepEval** phù hợp hơn cho production CI/CD vì nó tích hợp native với pytest và có cloud dashboard. Trong thực tế, nên dùng cả hai: RAGAS cho offline analysis khi phát triển, DeepEval cho automated quality gates trong CI/CD pipeline. Điều quan trọng nhất là calibrate bất kỳ framework nào với human labels (Exercise 1.2 câu 3) — score tuyệt đối khác nhau giữa frameworks, nhưng human agreement mới là ground truth.
 
 ### Exercise 3.5 — Retrieval Reranking (Bonus +5)
 
@@ -315,20 +316,29 @@ thay đổi Context Recall hay không.
 
 | ID | Recall before | Recall after | Precision before | Precision after | Delta Precision |
 |---|---:|---:|---:|---:|---:|
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| **Avg** | | | | | |
+| E01 | 1.000 | 1.000 | 0.756 | 0.756 | +0.000 |
+| E04 | 1.000 | 1.000 | 0.806 | 1.000 | +0.194 |
+| M01 | 1.000 | 1.000 | 1.000 | 0.887 | -0.113 |
+| M04 | 1.000 | 1.000 | 1.000 | 0.950 | -0.050 |
+| H01 | 0.909 | 0.909 | 1.000 | 1.000 | +0.000 |
+| H02 | 1.000 | 1.000 | 0.500 | 0.333 | -0.167 |
+| H03 | 0.760 | 0.760 | 1.000 | 1.000 | +0.000 |
+| H05 | 1.000 | 1.000 | 0.887 | 0.950 | +0.062 |
+| A03 | 0.429 | 0.429 | 0.950 | 1.000 | +0.050 |
+| **Avg** | **0.900** | **0.900** | **0.878** | **0.875** | **-0.002** |
 
 **Tại sao Recall dự kiến không đổi?**
 
-> *Câu trả lời:*
+> *Câu trả lời:* Context Recall đo coverage = |expected_tokens ∩ union_of_all_chunks| / |expected_tokens|. Reranking chỉ thay đổi **thứ tự** các chunks, không thêm hoặc xóa chunk nào. Vì union (phép hợp) của tất cả chunks trước và sau reranking là hoàn toàn giống nhau (cùng tập hợp chunks), nên coverage không thay đổi. Recall chỉ thay đổi khi retriever trả về tập chunks khác — reranking không làm điều này.
 
 **Khi nào reranking không đủ và cần sửa retriever/query/chunking?**
 
-> *Câu trả lời:*
+> *Câu trả lời:* Reranking không đủ trong các tình huống sau:
+> 1. **Recall thấp (< 0.7):** Khi retriever bỏ lỡ evidence quan trọng (ví dụ H03 recall=0.760, A03 recall=0.429), reranking không giúp vì chunk cần thiết không có trong tập retrieved. Cần cải thiện retriever (hybrid BM25 + semantic), mở rộng corpus, hoặc sửa chunking strategy.
+> 2. **Query quá mơ hồ hoặc multi-hop:** Khi câu hỏi cần thông tin từ nhiều documents nhưng query terms không overlap tốt với tất cả các documents (ví dụ H03 liên quan 3 docs), cần query decomposition hoặc query expansion trước khi retrieve.
+> 3. **Chunking quá lớn hoặc quá nhỏ:** Nếu chunks quá lớn, chúng chứa cả relevant và irrelevant text, làm giảm precision mà reranking không sửa được. Nếu quá nhỏ, evidence bị phân mảnh khiến recall giảm.
+> 4. **Lexical reranker mismatch:** Như kết quả cho thấy (avg delta = -0.002), lexical overlap reranker có thể **giảm** precision khi question terms overlap nhiều với noise chunks hơn là với relevant chunks (ví dụ M01, H02). Cần cross-encoder reranker (BERT-based) thay vì simple word overlap.
+
 
 ---
 
